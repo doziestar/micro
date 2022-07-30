@@ -1,0 +1,168 @@
+version: '3.8'
+services:
+  kafka:
+    image: confluentinc/cp-kafka:5.4.9-1-ubi8
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - '9092:9092'
+    networks:
+      - micro-backend
+    environment:
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_DEFAULT_REPLICATION_FACTOR=1
+      - KAFKA_DEFAULT_PARTITION_ASSIGNMENT=static
+      - KAFKA_CREATE_TOPICS="test:1:1,test2:1:1"
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_FILE=/kafka/config/server.properties
+      - KAFKA_LOG4J_CONFIG=/kafka/config/log4j.properties
+      - KAFKA_LOG_DIRS=/kafka/data
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      # - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,PLAINTEXT://:9092
+      # - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT:PLAINTEXT://kafka:9092,PLAINTEXT://:9092,EXTERNAL://localhost:9093
+      # - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
+      - ALLOW_PLAINTEXT_LISTENERS=yes
+      - log.dirs=/kafka/data
+    volumes:
+      - ./data/kafka:/kafka/data
+  zookeeper:
+    image: confluentinc/cp-zookeeper:4.0.0
+    container_name: zookeeper
+    ports:
+      - '2181:2181'
+    networks:
+      - micro-backend
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+      - ZOOKEEPER_CLIENT_PORT=2181
+      # - ZOOKEEPER_CLIENT_PORT=2181
+      # - ZOOKEEPER_TICK_TIME=2000
+      # - ZOOKEEPER_INIT_LIMIT=5
+      # - ZOOKEEPER_SYNC_LIMIT=2
+      # - ZOOKEEPER_SERVERS=kafka:2181
+      - ZOOKEEPER_ID=1
+      - ZOO_ADMIN_SERVER_PORT_NUMBER=8081
+      # - ZOOKEEPER_DATA_DIR=/var/lib/zookeeper
+    volumes:
+      - ~/kafka/data/zookeeper_data:/var/lib/zookeeper/data
+      - ~/kafka/data/zookeeper_log:/var/lib/zookeeper/log
+      - ./data/zookeeper:/var/lib/zookeeper
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop:latest
+    container_name: kafdrop
+    depends_on:
+      - kafka
+    ports:
+      - '9000:9000'
+    networks:
+      - micro-backend
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      # - KAFKA_TOPIC=kafdrop
+      # - KAFKA_GROUP_ID=kafdrop
+      - KAFKA_AUTO_OFFSET_RESET=earliest
+      - KAFKA_KEY_DESERIALIZER=org.apache.kafka.common.serialization.StringDeserializer
+      - KAFKA_VALUE_DESERIALIZER=org.apache.kafka.common.serialization.StringDeserializer
+      - KAFKA_AUTO_COMMIT_INTERVAL_MS=1000
+      - KAFKA_BROKERCONNECT=kafka:9092
+  # - JVM_OPTS="-Xms48m -XX:+UseG1GC -XX:+UseStringDeduplication -XX:+UseCompressedOops -XX:+UseTLAB"
+  analytics:
+    build:
+      context: .
+      dockerfile: ./analytics/Dockerfile
+    image: analytics
+    container_name: analytics
+    platform: linux/x86_64
+    volumes:
+      - ./analytics:/app
+    ports:
+      - '9002:9002'
+    # command: /start
+    networks:
+      - micro-backend
+    depends_on:
+      - kafdrop
+  products:
+    build:
+      context: .
+      dockerfile: ./products/Dockerfile
+    image: products
+    container_name: products
+    platform: linux/x86_64
+    volumes:
+      - ./products:/app
+    ports:
+      - '9002:9002'
+    # command: /start
+    networks:
+      - micro-backend
+    depends_on:
+      - kafdrop
+  internal:
+    build:
+      context: .
+      dockerfile: ./internal/Dockerfile
+    image: internal
+    container_name: internal
+    platform: linux/x86_64
+    volumes:
+      - ./internal:/app
+    ports:
+      - '9001:9001'
+    # command: /start
+    depends_on:
+      - micro-fastapi
+      - kafdrop
+    networks:
+      - micro-backend
+  micro-pg:
+    image: postgres:14.3-alpine
+    container_name: micro-pg
+    environment:
+      POSTGRES_USERNAME: root
+      POSTGRES_DATABASE: micro
+      POSTGRES_PASSWORD: password
+      POSTGRES_PORT: 5432
+      POSTGRES_SSL: off
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - '5432:5432'
+    networks:
+      - micro-backend
+  pgAdmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    depends_on:
+      - micro-pg
+    ports:
+      - '8083:80'
+    links:
+      - micro-pg
+    environment:
+      - DB_HOST=micro-pg
+      - DB_PORT=5432
+      - DB_USER=root
+      - DB_PASSWORD=password
+      - DB_NAME=test
+      - DB_SSLMODE=disable
+      - PGADMIN_DEFAULT_EMAIL=chidosiky2015@gmail.com
+      - PGADMIN_DEFAULT_PASSWORD=password
+      - PGADMIN_DEFAULT_USER=root
+      - PGADMIN_DEFAULT_DB=micro
+      - PGADMIN_DEFAULT_SSL=disable
+      - PGADMIN_DEFAULT_HOST=micro-pg
+      - PGADMIN_DEFAULT_PORT=5432
+      - PGADMIN_DEFAULT_SCHEMA=public
+      - PGADMIN_DEFAULT_LANGUAGE=en
+networks:
+  micro-backend:
+    driver: bridge
+
+volumes:
+  data:
+    driver: local
